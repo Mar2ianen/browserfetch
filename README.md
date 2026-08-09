@@ -78,6 +78,17 @@ or:
 ./target/release/browserfetch
 ```
 
+To inspect a specific installed browser instead of the default one:
+
+```sh
+browserfetch helium
+browserfetch --list
+```
+
+The selector can be the browser name, desktop entry ID, or executable name.
+Browsers without a `.desktop` file can still be selected when their executable
+is on `PATH`; profile-backed Nix installs are included in `--list`.
+
 ## Profile discovery
 
 - Chromium-family profiles are discovered from `~/.config/...` by looking for

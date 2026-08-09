@@ -69,6 +69,20 @@ pub fn discover_backend(exec: Option<&CommandSpec>) -> Option<ProfileBackend> {
         .find_map(|root| detect_backend(root, exec))
 }
 
+pub fn profile_selectors() -> Vec<String> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+    let mut selectors = profile_root_candidates(&home, None)
+        .into_iter()
+        .filter(|root| is_firefox_profile_root(root) || is_chromium_profile_root(root))
+        .flat_map(profile_root_hints)
+        .collect::<Vec<_>>();
+    selectors.sort();
+    selectors.dedup();
+    selectors
+}
+
 fn detect_backend(root: PathBuf, exec: Option<&CommandSpec>) -> Option<ProfileBackend> {
     if root_score(&root, exec) != 0 {
         return None;
@@ -138,6 +152,16 @@ fn root_score(root: &Path, exec: Option<&CommandSpec>) -> u8 {
         return 0;
     }
     1
+}
+
+fn profile_root_hints(root: PathBuf) -> Vec<String> {
+    let Some(name) = root.file_name().and_then(|name| name.to_str()) else {
+        return Vec::new();
+    };
+    name.split(['.', '-', '_'])
+        .filter(|part| part.len() >= 4)
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 fn is_firefox_profile_root(root: &Path) -> bool {
