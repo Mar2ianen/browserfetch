@@ -1,0 +1,14 @@
+pkgbase = browserfetch
+	pkgdesc = Fastfetch-style browser information tool for Linux desktops
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/Mar2ianen/browserfetch
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	depends = chafa
+	depends = xdg-utils
+	source = browserfetch-0.1.0.tar.gz::https://github.com/Mar2ianen/browserfetch/archive/3e7cadcee2d62f2c68de4302fd3f8aab8c938219.tar.gz
+	sha256sums = SKIP
+
+pkgname = browserfetch
