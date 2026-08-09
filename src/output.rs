@@ -1,5 +1,5 @@
 use crate::browser::Browser;
-use crate::util::command_output;
+use crate::util::{char_width, command_output, visible_width};
 use crate::{logo, os};
 
 const RESET: &str = "\x1b[0m";
@@ -19,11 +19,15 @@ pub fn render(browser: &Browser) {
         .saturating_sub(logo_width + 4)
         .clamp(50, 120);
 
+    let engine = browser
+        .engine
+        .map(|engine| engine.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
     let mut info = vec![
         title_line(theme),
         separator_line(right_width),
         row("Browser", &browser.name, right_width, theme),
-        row("Engine", &browser.engine, right_width, theme),
+        row("Engine", &engine, right_width, theme),
         row(
             "Version",
             &clean_version(browser.version.as_deref().unwrap_or("unknown")),
@@ -47,10 +51,10 @@ pub fn render(browser: &Browser) {
             right_width,
             theme,
         ));
-    } else if let Some(root) = &browser.profile_root {
+    } else if let Some(backend) = &browser.profile_backend {
         info.push(row(
             "Profile",
-            &root.display().to_string(),
+            &backend.root().display().to_string(),
             right_width,
             theme,
         ));
@@ -61,16 +65,26 @@ pub fn render(browser: &Browser) {
     let enabled = browser
         .extensions
         .iter()
-        .filter(|ext| ext.active != Some(false))
+        .filter(|ext| ext.active == Some(true))
         .count();
-    let disabled = browser.extensions.len().saturating_sub(enabled);
+    let disabled = browser
+        .extensions
+        .iter()
+        .filter(|ext| ext.active == Some(false))
+        .count();
+    let unknown = browser
+        .extensions
+        .iter()
+        .filter(|ext| ext.active.is_none())
+        .count();
     info.push(row(
         "Extensions",
         &format!(
-            "{} ({} enabled, {} disabled)",
+            "{} ({} enabled, {} disabled, {} unknown)",
             browser.extensions.len(),
             enabled,
-            disabled
+            disabled,
+            unknown
         ),
         right_width,
         theme,
@@ -124,13 +138,19 @@ fn extension_summary_rows(browser: &Browser, width: usize, theme: Theme) -> Vec<
     let enabled = browser
         .extensions
         .iter()
-        .filter(|ext| ext.active != Some(false))
+        .filter(|ext| ext.active == Some(true))
         .map(extension_label)
         .collect::<Vec<_>>();
     let disabled = browser
         .extensions
         .iter()
         .filter(|ext| ext.active == Some(false))
+        .map(extension_label)
+        .collect::<Vec<_>>();
+    let unknown = browser
+        .extensions
+        .iter()
+        .filter(|ext| ext.active.is_none())
         .map(extension_label)
         .collect::<Vec<_>>();
 
@@ -140,6 +160,9 @@ fn extension_summary_rows(browser: &Browser, width: usize, theme: Theme) -> Vec<
     }
     if !disabled.is_empty() {
         rows.extend(extension_tree_group("Disabled", &disabled, width, theme));
+    }
+    if !unknown.is_empty() {
+        rows.extend(extension_tree_group("Unknown", &unknown, width, theme));
     }
     rows
 }
@@ -202,11 +225,15 @@ fn truncate(value: &str, max_width: usize) -> String {
         return ".".repeat(max_width);
     }
     let mut out = String::new();
-    for (used, ch) in value.chars().enumerate() {
-        if used + 3 >= max_width {
+    let target_width = max_width - 3;
+    let mut used_width = 0;
+    for ch in value.chars() {
+        let width = char_width(ch);
+        if used_width + width > target_width {
             break;
         }
         out.push(ch);
+        used_width += width;
     }
     out.push_str("...");
     out
@@ -218,22 +245,4 @@ fn terminal_width() -> usize {
         .and_then(|value| value.parse().ok())
         .or_else(|| command_output("tput", &["cols"]).and_then(|value| value.parse().ok()))
         .unwrap_or(140)
-}
-
-fn visible_width(text: &str) -> usize {
-    let mut width = 0;
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-            continue;
-        }
-        width += 1;
-    }
-    width
 }

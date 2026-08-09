@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::util::home_dir;
+use crate::util::{char_width, home_dir, visible_width};
 
 pub fn render_logo(icon: Option<&Path>, label: &str) -> Vec<String> {
     icon.and_then(chafa_logo)
@@ -99,17 +99,13 @@ fn chafa_logo(path: &Path) -> Option<Vec<String>> {
 
 fn trim_visible_end(line: &str) -> String {
     let plain = strip_ansi(line);
-    let trim_count = plain
-        .chars()
-        .rev()
-        .take_while(|ch| ch.is_whitespace())
-        .count();
-    if trim_count == 0 {
+    let trimmed_plain = plain.trim_end();
+    if trimmed_plain == plain {
         return line.to_string();
     }
 
     let mut visible_seen = 0;
-    let target_visible = plain.chars().count().saturating_sub(trim_count);
+    let target_visible = visible_width(trimmed_plain);
     let mut cut = line.len();
     let mut chars = line.char_indices().peekable();
     while let Some((idx, ch)) = chars.next() {
@@ -125,7 +121,7 @@ fn trim_visible_end(line: &str) -> String {
             cut = idx;
             break;
         }
-        visible_seen += 1;
+        visible_seen += char_width(ch);
     }
 
     let mut trimmed = line[..cut].to_string();
@@ -153,10 +149,32 @@ fn strip_ansi(text: &str) -> String {
 
 fn text_logo(label: &str) -> Vec<String> {
     let label = label.trim();
-    let width = label.len().clamp(12, 28);
+    let width = visible_width(label).clamp(12, 28);
+    let label = truncate_label(label, width);
+    let label_width = visible_width(&label);
+    let padding = " ".repeat(width.saturating_sub(label_width));
     vec![
         format!("+{}+", "-".repeat(width + 2)),
-        format!("| {:width$} |", label, width = width),
+        format!("| {label}{padding} |"),
         format!("+{}+", "-".repeat(width + 2)),
     ]
+}
+
+fn truncate_label(label: &str, width: usize) -> String {
+    if visible_width(label) <= width {
+        return label.to_string();
+    }
+    let target_width = width.saturating_sub(3);
+    let mut output = String::new();
+    let mut used_width = 0;
+    for ch in label.chars() {
+        let ch_width = char_width(ch);
+        if used_width + ch_width > target_width {
+            break;
+        }
+        output.push(ch);
+        used_width += ch_width;
+    }
+    output.push_str("...");
+    output
 }

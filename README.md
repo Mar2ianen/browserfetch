@@ -3,19 +3,20 @@
 A tiny, terminal-friendly browser fetcher for Linux desktops.
 
 `browserfetch` is a deliberately small Rust CLI in the spirit of `fastfetch`,
-but focused on the browser you actually use. It detects the XDG default browser,
-shows its engine and version, finds the active profile, lists extensions, and
-prints a compact OS/session summary.
+but focused on the browser you actually use. It reads the XDG default browser's
+desktop entry, shows its name, icon and version, finds extra profile data when a
+known local layout is present, and prints a compact OS/session summary.
 
 The name is a little joke. The output is useful enough to keep around.
 
 ## What it does
 
-- detects the default browser through `xdg-settings` and desktop entry files;
-- recognizes Firefox, Chromium, Chrome, Brave, Vivaldi, Edge, Opera and GNOME
-  Web/WebKit-style desktop entries;
+- detects any XDG default browser through `xdg-settings` and desktop entry
+  files;
+- treats Firefox and Chromium layouts as optional profile backends rather than
+  hard-coded browser identities;
 - reads Firefox and Chromium-family profile data from local configuration
-  directories;
+  directories when the data format is present;
 - displays installed extensions from Firefox `extensions.json` or Chromium
   `manifest.json` files;
 - renders the browser icon with optional `chafa`, falling back to a text box;
@@ -31,11 +32,13 @@ user@host
                                    OS        : Linux / 6.x
                                    Session   : wayland / niri
                                    Profile   : Default / Default
-                                   Extensions: 12 (12 enabled, 0 disabled)
+                                   Extensions: 12 (12 enabled, 0 disabled, 0 unknown)
 ```
 
-The exact output depends on the desktop entry and browser profile installed on
-the machine.
+Any browser with a valid `.desktop` entry can show its identity and icon; its
+version is shown when the entry's executable can be parsed and invoked.
+Profile and extension details are available when browserfetch recognizes the
+local Firefox or Chromium data layout.
 
 ## Install
 
@@ -73,12 +76,15 @@ or:
 ./target/release/browserfetch
 ```
 
-## Supported profile locations
+## Profile discovery
 
-- Chromium-family profiles are read from `~/.config/...`.
-- Firefox profiles are read from `~/.config/mozilla/firefox`,
+- Chromium-family profiles are discovered from `~/.config/...` by looking for
+  `Local State` and profile directories.
+- Firefox profiles are discovered from `~/.config/mozilla/firefox`,
   `~/.mozilla/firefox` and the common Flatpak Firefox path.
-- Firefox extensions are parsed from the active profile's `extensions.json`.
+- Firefox extensions are parsed from the active profile's `extensions.json`;
+  Chromium extensions are read from `manifest.json` and their state from
+  `Preferences`.
 
 ## Development
 
