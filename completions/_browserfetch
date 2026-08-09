@@ -1,0 +1,18 @@
+#compdef browserfetch
+
+_browserfetch() {
+    local -a browsers
+    browsers=("${(@f)$(browserfetch --complete 2>/dev/null)}")
+
+    local state
+    _arguments \
+        '(-h --help 1)'{-h,--help}'[show help]' \
+        '(- 1)--list[list installed browsers]' \
+        '1:browser:->browser'
+
+    if [[ "$state" == browser ]]; then
+        _describe -t browsers 'browser' browsers
+    fi
+}
+
+_browserfetch "$@"

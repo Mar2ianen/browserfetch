@@ -89,6 +89,23 @@ The selector can be the browser name, desktop entry ID, or executable name.
 Browsers without a `.desktop` file can still be selected when their executable
 is on `PATH`; profile-backed Nix installs are included in `--list`.
 
+Shell completion is available for browser names, including names with spaces:
+
+```sh
+# zsh
+fpath=(/path/to/browserfetch/completions $fpath)
+autoload -Uz compinit && compinit
+
+# bash
+source /path/to/browserfetch/completions/browserfetch.bash
+
+# fish
+source /path/to/browserfetch/completions/browserfetch.fish
+```
+
+The completion scripts query `browserfetch --complete`, so the candidates stay
+in sync with browsers installed on the machine.
+
 ## Profile discovery
 
 - Chromium-family profiles are discovered from `~/.config/...` by looking for

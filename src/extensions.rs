@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -226,9 +226,12 @@ fn chromium_extensions(root: &Path, active_profile: Option<&Profile>) -> Vec<Ext
     let mut extensions = Vec::new();
 
     for profile in profiles {
-        let states = chromium_extension_states(&profile.path);
+        let settings = chromium_extension_settings(&profile.path);
+        let states = chromium_extension_states_from_settings(&settings);
         let ext_root = profile.path.join("Extensions");
+        let mut seen_ids = BTreeSet::new();
         let Ok(ids) = fs::read_dir(ext_root) else {
+            extensions.extend(chromium_settings_extensions(&settings, states, &seen_ids));
             continue;
         };
         for id_entry in ids.flatten() {
@@ -250,6 +253,9 @@ fn chromium_extensions(root: &Path, active_profile: Option<&Profile>) -> Vec<Ext
             let Ok(json) = serde_json::from_str::<Value>(&data) else {
                 continue;
             };
+            if let Some(id) = id.as_ref() {
+                seen_ids.insert(id.clone());
+            }
             let name = json_string(&json, "name")
                 .filter(|name| !name.starts_with("__MSG_"))
                 .or_else(|| id.clone())
@@ -265,28 +271,65 @@ fn chromium_extensions(root: &Path, active_profile: Option<&Profile>) -> Vec<Ext
                 active,
             });
         }
+
+        extensions.extend(chromium_settings_extensions(&settings, states, &seen_ids));
     }
 
     sort_extensions(extensions)
 }
 
-fn chromium_extension_states(profile: &Path) -> BTreeMap<String, bool> {
-    let Some(settings) = read_json(&profile.join("Preferences"))
+fn chromium_extension_settings(profile: &Path) -> BTreeMap<String, Value> {
+    read_json(&profile.join("Preferences"))
         .and_then(|json| json.pointer("/extensions/settings").cloned())
         .and_then(|value| value.as_object().cloned())
-    else {
-        return BTreeMap::new();
-    };
+        .map(|settings| settings.into_iter().collect())
+        .unwrap_or_default()
+}
 
+fn chromium_extension_states_from_settings(
+    settings: &BTreeMap<String, Value>,
+) -> BTreeMap<String, bool> {
     settings
-        .into_iter()
+        .iter()
         .filter_map(|(id, value)| {
-            let state = value.get("state").and_then(Value::as_i64)?;
-            match state {
-                0 => Some((id, false)),
-                1 => Some((id, true)),
-                _ => None,
-            }
+            chromium_extension_active(value).map(|active| (id.clone(), active))
+        })
+        .collect()
+}
+
+fn chromium_extension_active(setting: &Value) -> Option<bool> {
+    if let Some(state) = setting.get("state").and_then(Value::as_i64) {
+        return match state {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        };
+    }
+    if let Some(reasons) = setting.get("disable_reasons").and_then(Value::as_array) {
+        return Some(reasons.is_empty());
+    }
+    setting.get("manifest").map(|_| true)
+}
+
+fn chromium_settings_extensions(
+    settings: &BTreeMap<String, Value>,
+    states: BTreeMap<String, bool>,
+    seen_ids: &BTreeSet<String>,
+) -> Vec<Extension> {
+    settings
+        .iter()
+        .filter(|(id, _)| !seen_ids.contains(*id))
+        .filter_map(|(id, setting)| {
+            let manifest = setting.get("manifest")?;
+            let name = json_string(manifest, "name")
+                .filter(|name| !name.starts_with("__MSG_"))
+                .unwrap_or_else(|| id.clone());
+            Some(Extension {
+                name,
+                version: json_string(manifest, "version"),
+                id: Some(id.clone()),
+                active: states.get(id).copied(),
+            })
         })
         .collect()
 }
@@ -537,6 +580,49 @@ mod tests {
         assert_eq!(disabled.version.as_deref(), Some("10.0.0"));
         assert_eq!(disabled.active, Some(false));
         assert_eq!(enabled.active, Some(true));
+
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn chromium_reads_extensions_embedded_in_preferences() {
+        let root = temp_root();
+        let profile = Profile {
+            name: Some("Default".to_string()),
+            path: root.join("Default"),
+            is_default: true,
+        };
+        fs::create_dir(&profile.path).expect("create profile");
+        write_json(
+            &profile.path.join("Preferences"),
+            r#"{
+                "extensions": {
+                    "settings": {
+                        "enabled": {
+                            "disable_reasons": [],
+                            "manifest": {"name": "Embedded", "version": "2.0.0"}
+                        },
+                        "disabled": {
+                            "disable_reasons": [1],
+                            "manifest": {"name": "Disabled embedded", "version": "1.0.0"}
+                        }
+                    }
+                }
+            }"#,
+        );
+
+        let extensions = chromium_extensions(&root, Some(&profile));
+        let embedded = extensions
+            .iter()
+            .find(|extension| extension.name == "Embedded")
+            .expect("embedded extension");
+        let disabled = extensions
+            .iter()
+            .find(|extension| extension.name == "Disabled embedded")
+            .expect("disabled embedded extension");
+        assert_eq!(embedded.version.as_deref(), Some("2.0.0"));
+        assert_eq!(embedded.active, Some(true));
+        assert_eq!(disabled.active, Some(false));
 
         fs::remove_dir_all(root).expect("remove test directory");
     }

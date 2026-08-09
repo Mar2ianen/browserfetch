@@ -133,6 +133,16 @@ impl Browser {
         browsers
     }
 
+    pub fn completion_candidates() -> Vec<String> {
+        let mut candidates = Self::installed_browsers()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|name| name.to_ascii_lowercase());
+        candidates.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+        candidates
+    }
+
     fn from_desktop_entry(entry: Option<DesktopEntry>) -> Self {
         let desktop_id = entry.as_ref().map(|entry| entry.id.clone());
         let exec = entry.as_ref().and_then(|entry| entry.exec.clone());
@@ -252,7 +262,17 @@ fn parse_desktop_entry(id: &str, data: &str) -> DesktopEntry {
 fn desktop_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(home) = home_dir() {
+        dirs.push(home.join(".nix-profile/share/applications"));
         dirs.push(home.join(".local/share/applications"));
+    }
+    if let Some(data_home) = env::var_os("XDG_DATA_HOME") {
+        dirs.push(PathBuf::from(data_home).join("applications"));
+    }
+    if let Some(profiles) = env::var_os("NIX_PROFILES") {
+        dirs.extend(env::split_paths(&profiles).map(|profile| profile.join("share/applications")));
+    }
+    if let Some(data_dirs) = env::var_os("XDG_DATA_DIRS") {
+        dirs.extend(env::split_paths(&data_dirs).map(|directory| directory.join("applications")));
     }
     dirs.push(PathBuf::from("/usr/local/share/applications"));
     dirs.push(PathBuf::from("/usr/share/applications"));

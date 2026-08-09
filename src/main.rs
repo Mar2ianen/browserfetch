@@ -19,13 +19,15 @@ fn main() {
         return;
     }
 
-    if args.len() > 1 {
-        eprintln!("Expected at most one browser selector.");
-        print_help();
-        std::process::exit(2);
+    if args.first().is_some_and(|arg| arg == "--complete") {
+        for candidate in Browser::completion_candidates() {
+            println!("{candidate}");
+        }
+        return;
     }
 
-    let browser = match args.first() {
+    let selector = (!args.is_empty()).then(|| args.join(" "));
+    let browser = match selector.as_deref() {
         Some(selector) => Browser::detect_selector(selector).unwrap_or_else(|| {
             eprintln!("No installed browser matched: {selector}");
             print_installed_browsers();
@@ -41,9 +43,11 @@ fn print_help() {
     println!();
     println!("Usage: browserfetch [browser]");
     println!("       browserfetch --list");
+    println!("       browserfetch --complete");
     println!();
     println!("Without a selector, uses the default XDG browser.");
     println!("A selector chooses an installed browser by name, desktop ID or executable.");
+    println!("Names with spaces may be passed quoted or as separate words.");
     println!("Prints browser, engine, OS, profile and extension info.");
     println!("Uses chafa for browser logos. If chafa/icon is unavailable, prints a text label.");
 }
