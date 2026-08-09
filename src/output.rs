@@ -237,12 +237,56 @@ fn truncate(value: &str, max_width: usize) -> String {
 }
 
 fn terminal_width() -> usize {
-    std::env::var("COLUMNS")
-        .ok()
-        .and_then(|value| positive_width(&value))
+    tty_width()
         .or_else(|| command_output("stty", &["size"]).and_then(|value| positive_width(&value)))
         .or_else(|| command_output("tput", &["cols"]).and_then(|value| positive_width(&value)))
+        .or_else(|| {
+            std::env::var("COLUMNS")
+                .ok()
+                .and_then(|value| positive_width(&value))
+        })
         .unwrap_or(140)
+}
+
+#[cfg(target_os = "linux")]
+fn tty_width() -> Option<usize> {
+    use std::os::fd::RawFd;
+
+    #[repr(C)]
+    struct Winsize {
+        rows: u16,
+        columns: u16,
+        x_pixels: u16,
+        y_pixels: u16,
+    }
+
+    unsafe extern "C" {
+        fn ioctl(fd: RawFd, request: usize, ...) -> i32;
+    }
+
+    const TIOCGWINSZ: usize = 0x5413;
+
+    for fd in [1, 2, 0] {
+        let mut size = Winsize {
+            rows: 0,
+            columns: 0,
+            x_pixels: 0,
+            y_pixels: 0,
+        };
+        // SAFETY: `size` is a valid writable `struct winsize` and the ioctl
+        // request only fills that structure for the selected terminal fd.
+        let result = unsafe { ioctl(fd, TIOCGWINSZ, &mut size) };
+        if result == 0 && size.columns > 0 {
+            return Some(usize::from(size.columns));
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn tty_width() -> Option<usize> {
+    None
 }
 
 fn positive_width(value: &str) -> Option<usize> {
