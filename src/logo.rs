@@ -71,6 +71,8 @@ fn find_named_file(root: &Path, names: &[String], depth: usize) -> Option<PathBu
 fn chafa_logo(path: &Path) -> Option<Vec<String>> {
     let output = Command::new("chafa")
         .args([
+            "--format",
+            "symbols",
             "--symbols",
             "block",
             "--fill",
