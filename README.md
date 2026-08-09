@@ -13,14 +13,14 @@ The name is a little joke. The output is useful enough to keep around.
 
 - detects any XDG default browser through `xdg-settings` and desktop entry
   files;
-- treats Firefox and Chromium layouts as optional profile backends rather than
+- treats Firefox, Chromium and Epiphany layouts as optional profile backends rather than
   hard-coded browser identities;
 - reads Firefox and Chromium-family profile data from local configuration
   directories when the data format is present;
 - displays installed extensions from Firefox `extensions.json` or Chromium
-  `manifest.json` files;
-- reports Gecko/Blink from profile backends and recognizes WebKit for GNOME Web
-  and Servo for Servo-style desktop entries;
+  `manifest.json`/`Preferences` data;
+- reports Gecko/Blink/WebKitGTK from profile backends and recognizes Servo from
+  its self-reported version;
 - renders the browser icon with optional `chafa`, falling back to a text box;
 - stays local: it does not make network requests or upload browser data.
 
@@ -110,6 +110,9 @@ in sync with browsers installed on the machine.
 
 - Chromium-family profiles are discovered from `~/.config/...` by looking for
   `Local State` and profile directories.
+- Epiphany profiles are discovered under `$XDG_DATA_HOME/epiphany` and
+  Flatpak's `~/.var/app/org.gnome.Epiphany/data/epiphany` when migration and
+  profile data markers are present.
 - Firefox profiles are discovered from `~/.config/mozilla/firefox`,
   `~/.mozilla/firefox` and the common Flatpak Firefox path.
 - Firefox extensions are parsed from the active profile's `extensions.json`;

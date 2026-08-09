@@ -241,9 +241,18 @@ fn truncate(value: &str, max_width: usize) -> String {
 fn terminal_width() -> usize {
     std::env::var("COLUMNS")
         .ok()
-        .and_then(|value| value.parse().ok())
-        .or_else(|| command_output("tput", &["cols"]).and_then(|value| value.parse().ok()))
+        .and_then(|value| positive_width(&value))
+        .or_else(|| command_output("stty", &["size"]).and_then(|value| positive_width(&value)))
+        .or_else(|| command_output("tput", &["cols"]).and_then(|value| positive_width(&value)))
         .unwrap_or(140)
+}
+
+fn positive_width(value: &str) -> Option<usize> {
+    value
+        .split_whitespace()
+        .last()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|width| *width > 0)
 }
 
 #[cfg(test)]
@@ -259,5 +268,18 @@ mod tests {
         assert!(!rows[0].contains("├─"));
         assert!(rows[1].contains("├─ First extension"));
         assert!(rows[2].contains("└─ Last extension"));
+    }
+
+    #[test]
+    fn truncate_respects_unicode_display_width() {
+        assert_eq!(truncate("日本語 browser", 12), "日本語 br...");
+        assert_eq!(visible_width(&truncate("日本語 browser", 12)), 12);
+    }
+
+    #[test]
+    fn parses_terminal_width_from_columns_or_stty_output() {
+        assert_eq!(positive_width("120"), Some(120));
+        assert_eq!(positive_width("24 120"), Some(120));
+        assert_eq!(positive_width("0"), None);
     }
 }

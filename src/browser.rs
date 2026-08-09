@@ -15,7 +15,7 @@ use crate::util::{CommandSpec, command_output, command_spec_output, home_dir, pa
 pub enum Engine {
     Gecko,
     Blink,
-    WebKit,
+    WebKitGtk,
     Servo,
 }
 
@@ -24,7 +24,7 @@ impl Engine {
         match self {
             Self::Gecko => "208",
             Self::Blink => "33",
-            Self::WebKit => "39",
+            Self::WebKitGtk => "39",
             Self::Servo => "201",
         }
     }
@@ -35,7 +35,7 @@ impl fmt::Display for Engine {
         let name = match self {
             Self::Gecko => "Gecko",
             Self::Blink => "Blink",
-            Self::WebKit => "WebKit",
+            Self::WebKitGtk => "WebKitGTK",
             Self::Servo => "Servo",
         };
         formatter.write_str(name)
@@ -144,7 +144,6 @@ impl Browser {
     }
 
     fn from_desktop_entry(entry: Option<DesktopEntry>) -> Self {
-        let desktop_id = entry.as_ref().map(|entry| entry.id.clone());
         let exec = entry.as_ref().and_then(|entry| entry.exec.clone());
         let icon_name = entry.as_ref().and_then(|entry| entry.icon.clone());
         let name = entry
@@ -152,7 +151,7 @@ impl Browser {
             .and_then(|entry| entry.name.clone())
             .or_else(|| exec.as_ref().map(|spec| spec.program.clone()))
             .unwrap_or_else(|| "Unknown browser".to_string());
-        Self::from_parts(desktop_id, name, exec, icon_name)
+        Self::from_parts(name, exec, icon_name)
     }
 
     fn from_command(program: PathBuf) -> Self {
@@ -162,15 +161,11 @@ impl Browser {
             args: Vec::new(),
             env: Vec::new(),
         };
-        Self::from_parts(None, name, Some(exec), None)
+        Self::from_parts(name, Some(exec), None)
     }
 
-    fn from_parts(
-        desktop_id: Option<String>,
-        name: String,
-        exec: Option<CommandSpec>,
-        icon_name: Option<String>,
-    ) -> Self {
+    fn from_parts(name: String, exec: Option<CommandSpec>, icon_name: Option<String>) -> Self {
+        let version = exec.as_ref().and_then(browser_version);
         let profile_backend = extensions::discover_backend(exec.as_ref());
         let active_profile = profile_backend
             .as_ref()
@@ -182,17 +177,9 @@ impl Browser {
         let engine = profile_backend
             .as_ref()
             .map(ProfileBackend::engine)
-            .or_else(|| {
-                detect_engine_hint(
-                    desktop_id.as_deref(),
-                    &name,
-                    exec.as_ref(),
-                    icon_name.as_deref(),
-                )
-            });
+            .or_else(|| version.as_deref().and_then(engine_from_version));
         let color = engine.map(Engine::color).unwrap_or("117");
         let icon = icon_name.and_then(|icon| logo::resolve_icon(&icon));
-        let version = exec.as_ref().and_then(browser_version);
 
         Self {
             name,
@@ -345,47 +332,13 @@ fn browser_version(exec: &CommandSpec) -> Option<String> {
     command_spec_output(exec, &["--version"])
 }
 
-fn detect_engine_hint(
-    desktop_id: Option<&str>,
-    name: &str,
-    exec: Option<&CommandSpec>,
-    icon: Option<&str>,
-) -> Option<Engine> {
-    let probe = format!(
-        "{} {} {} {}",
-        desktop_id.unwrap_or_default().to_ascii_lowercase(),
-        name.to_ascii_lowercase(),
-        exec.map(|spec| spec.program.to_ascii_lowercase())
-            .unwrap_or_default(),
-        icon.unwrap_or_default().to_ascii_lowercase()
-    );
-
-    if ["epiphany", "org.gnome.epiphany", "gnome-web", "webkit"]
-        .iter()
-        .any(|signature| probe.contains(signature))
-    {
-        return Some(Engine::WebKit);
-    }
-    if ["servo", "servoshell"]
-        .iter()
-        .any(|signature| probe.contains(signature))
-    {
-        return Some(Engine::Servo);
-    }
-    None
+fn engine_from_version(version: &str) -> Option<Engine> {
+    version.starts_with("Servo ").then_some(Engine::Servo)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn command(program: &str) -> CommandSpec {
-        CommandSpec {
-            program: program.to_string(),
-            args: Vec::new(),
-            env: Vec::new(),
-        }
-    }
 
     #[test]
     fn selector_matches_helium_name_and_executable() {
@@ -398,41 +351,8 @@ mod tests {
     }
 
     #[test]
-    fn hints_webkit_for_gnome_web() {
-        assert_eq!(
-            detect_engine_hint(
-                Some("org.gnome.Epiphany.desktop"),
-                "Web",
-                Some(&command("epiphany")),
-                None
-            ),
-            Some(Engine::WebKit)
-        );
-    }
-
-    #[test]
-    fn hints_servo_without_creating_a_profile_backend() {
-        assert_eq!(
-            detect_engine_hint(
-                Some("servo.desktop"),
-                "Servo",
-                Some(&command("servoshell")),
-                None
-            ),
-            Some(Engine::Servo)
-        );
-    }
-
-    #[test]
-    fn leaves_unknown_engine_unknown() {
-        assert_eq!(
-            detect_engine_hint(
-                Some("foo-browser.desktop"),
-                "FooBrowser",
-                Some(&command("foo-browser")),
-                None
-            ),
-            None
-        );
+    fn detects_servo_from_self_reported_version() {
+        assert_eq!(engine_from_version("Servo 2026-08-09"), Some(Engine::Servo));
+        assert_eq!(engine_from_version("FooBrowser 1.0"), None);
     }
 }

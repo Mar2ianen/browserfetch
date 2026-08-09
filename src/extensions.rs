@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,12 +14,13 @@ use crate::util::{CommandSpec, home_dir};
 pub enum ProfileBackend {
     Firefox(PathBuf),
     Chromium(PathBuf),
+    Epiphany(PathBuf),
 }
 
 impl ProfileBackend {
     pub fn root(&self) -> &Path {
         match self {
-            Self::Firefox(root) | Self::Chromium(root) => root,
+            Self::Firefox(root) | Self::Chromium(root) | Self::Epiphany(root) => root,
         }
     }
 
@@ -26,6 +28,7 @@ impl ProfileBackend {
         match self {
             Self::Firefox(_) => Engine::Gecko,
             Self::Chromium(_) => Engine::Blink,
+            Self::Epiphany(_) => Engine::WebKitGtk,
         }
     }
 
@@ -36,6 +39,7 @@ impl ProfileBackend {
                 .find(|profile| profile.is_default)
                 .or_else(|| firefox_profiles(root).into_iter().next()),
             Self::Chromium(root) => chromium_active_profile(root),
+            Self::Epiphany(_) => None,
         }
     }
 
@@ -43,6 +47,7 @@ impl ProfileBackend {
         match self {
             Self::Firefox(root) => firefox_extensions(root, active_profile),
             Self::Chromium(root) => chromium_extensions(root, active_profile),
+            Self::Epiphany(_) => Vec::new(),
         }
     }
 }
@@ -75,7 +80,11 @@ pub fn profile_selectors() -> Vec<String> {
     };
     let mut selectors = profile_root_candidates(&home, None)
         .into_iter()
-        .filter(|root| is_firefox_profile_root(root) || is_chromium_profile_root(root))
+        .filter(|root| {
+            is_firefox_profile_root(root)
+                || is_chromium_profile_root(root)
+                || is_epiphany_profile_root(root)
+        })
         .flat_map(profile_root_hints)
         .collect::<Vec<_>>();
     selectors.sort();
@@ -91,6 +100,8 @@ fn detect_backend(root: PathBuf, exec: Option<&CommandSpec>) -> Option<ProfileBa
         Some(ProfileBackend::Firefox(root))
     } else if is_chromium_profile_root(&root) {
         Some(ProfileBackend::Chromium(root))
+    } else if is_epiphany_profile_root(&root) {
+        Some(ProfileBackend::Epiphany(root))
     } else {
         None
     }
@@ -98,12 +109,14 @@ fn detect_backend(root: PathBuf, exec: Option<&CommandSpec>) -> Option<ProfileBa
 
 fn profile_root_candidates(home: &Path, exec: Option<&CommandSpec>) -> Vec<PathBuf> {
     let config = home.join(".config");
+    let data = xdg_data_home(home);
     let mut roots = vec![
         config.join("mozilla/firefox"),
         home.join(".mozilla/firefox"),
         home.join(".var/app/org.mozilla.firefox/.mozilla/firefox"),
     ];
     collect_dirs(&config, 2, &mut roots);
+    collect_dirs(&data, 1, &mut roots);
     collect_dirs(&home.join(".mozilla"), 2, &mut roots);
     collect_dirs(&home.join(".var/app"), 4, &mut roots);
 
@@ -132,6 +145,12 @@ fn collect_dirs(root: &Path, depth: usize, output: &mut Vec<PathBuf>) {
     }
 }
 
+fn xdg_data_home(home: &Path) -> PathBuf {
+    env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"))
+}
+
 fn root_score(root: &Path, exec: Option<&CommandSpec>) -> u8 {
     let Some(exec) = exec else {
         return 1;
@@ -142,7 +161,13 @@ fn root_score(root: &Path, exec: Option<&CommandSpec>) -> u8 {
         .and_then(OsStr::to_str)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if program.len() >= 4 && root.contains(&program) {
+    let root_name = Path::new(&root)
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or_default();
+    if program.len() >= 4
+        && (root.contains(&program) || (root_name.len() >= 4 && program.contains(root_name)))
+    {
         return 0;
     }
     if exec.args.iter().any(|arg| {
@@ -173,6 +198,13 @@ fn is_chromium_profile_root(root: &Path) -> bool {
         && chromium_profiles(root).iter().any(|profile| {
             profile.path.join("Preferences").is_file() || profile.path.join("Extensions").is_dir()
         })
+}
+
+fn is_epiphany_profile_root(root: &Path) -> bool {
+    root.join(".migrated").is_file()
+        && ["bookmarks.gvdb", "ephy-history.db", "cookies.sqlite"]
+            .iter()
+            .any(|file| root.join(file).is_file())
 }
 
 fn chromium_active_profile(root: &Path) -> Option<Profile> {
@@ -256,8 +288,7 @@ fn chromium_extensions(root: &Path, active_profile: Option<&Profile>) -> Vec<Ext
             if let Some(id) = id.as_ref() {
                 seen_ids.insert(id.clone());
             }
-            let name = json_string(&json, "name")
-                .filter(|name| !name.starts_with("__MSG_"))
+            let name = extension_manifest_name(&json, Some(&version_dir))
                 .or_else(|| id.clone())
                 .unwrap_or_else(|| "Unknown Chromium extension".to_string());
             let version = json_string(&json, "version");
@@ -321,9 +352,9 @@ fn chromium_settings_extensions(
         .filter(|(id, _)| !seen_ids.contains(*id))
         .filter_map(|(id, setting)| {
             let manifest = setting.get("manifest")?;
-            let name = json_string(manifest, "name")
-                .filter(|name| !name.starts_with("__MSG_"))
-                .unwrap_or_else(|| id.clone());
+            let extension_root = setting.get("path").and_then(Value::as_str).map(Path::new);
+            let name =
+                extension_manifest_name(manifest, extension_root).unwrap_or_else(|| id.clone());
             Some(Extension {
                 name,
                 version: json_string(manifest, "version"),
@@ -332,6 +363,40 @@ fn chromium_settings_extensions(
             })
         })
         .collect()
+}
+
+fn extension_manifest_name(manifest: &Value, root: Option<&Path>) -> Option<String> {
+    let name = json_string(manifest, "name")?;
+    let Some(key) = name
+        .strip_prefix("__MSG_")
+        .and_then(|name| name.strip_suffix("__"))
+    else {
+        return Some(name);
+    };
+    let root = root?;
+
+    let mut locales = Vec::new();
+    if let Some(locale) = json_string(manifest, "default_locale") {
+        locales.push(locale);
+    }
+    if let Ok(language) = env::var("LANG") {
+        let language = language.split(['.', '@']).next().unwrap_or(&language);
+        locales.push(language.to_string());
+        if let Some(base) = language.split('_').next() {
+            locales.push(base.to_string());
+        }
+    }
+    locales.extend(["en".to_string(), "en_US".to_string()]);
+    locales.dedup();
+
+    locales.into_iter().find_map(|locale| {
+        let messages = read_json(&root.join("_locales").join(locale).join("messages.json"))?;
+        messages
+            .get(key)
+            .and_then(|message| message.get("message"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
 }
 
 fn firefox_extensions(root: &Path, active_profile: Option<&Profile>) -> Vec<Extension> {
@@ -628,6 +693,64 @@ mod tests {
     }
 
     #[test]
+    fn chromium_localizes_manifest_names() {
+        let root = temp_root();
+        let profile = Profile {
+            name: Some("Default".to_string()),
+            path: root.join("Default"),
+            is_default: true,
+        };
+        fs::create_dir(&profile.path).expect("create profile");
+        write_json(
+            &profile.path.join("Preferences"),
+            r#"{"extensions":{"settings":{"localized":{"state":1}}}}"#,
+        );
+        write_json(
+            &profile
+                .path
+                .join("Extensions/localized/1.0.0/manifest.json"),
+            r#"{"name":"__MSG_name__","default_locale":"en","version":"1.0.0"}"#,
+        );
+        write_json(
+            &profile
+                .path
+                .join("Extensions/localized/1.0.0/_locales/en/messages.json"),
+            r#"{"name":{"message":"Localized extension"}}"#,
+        );
+
+        let extensions = chromium_extensions(&root, Some(&profile));
+        assert_eq!(extensions[0].name, "Localized extension");
+
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn detects_epiphany_profile_with_structural_markers() {
+        let base = temp_root();
+        let root = base.join("epiphany");
+        fs::create_dir(&root).expect("create Epiphany root");
+        fs::write(root.join(".migrated"), "36").expect("write migration marker");
+        assert!(!is_epiphany_profile_root(&root));
+        fs::write(root.join("bookmarks.gvdb"), "").expect("write bookmarks database");
+
+        let exec = CommandSpec {
+            program: "/usr/bin/epiphany".to_string(),
+            args: Vec::new(),
+            env: Vec::new(),
+        };
+        assert_eq!(
+            detect_backend(root.clone(), Some(&exec)),
+            Some(ProfileBackend::Epiphany(root.clone()))
+        );
+        assert_eq!(
+            ProfileBackend::Epiphany(root.clone()).engine(),
+            Engine::WebKitGtk
+        );
+
+        fs::remove_dir_all(base).expect("remove test directory");
+    }
+
+    #[test]
     fn executable_hint_prioritizes_matching_profile_root() {
         let exec = CommandSpec {
             program: "/usr/lib/firefox/firefox".to_string(),
@@ -637,6 +760,13 @@ mod tests {
         let firefox_root = Path::new("/tmp/.config/mozilla/firefox");
         let chromium_root = Path::new("/tmp/.config/google-chrome");
         assert!(root_score(firefox_root, Some(&exec)) < root_score(chromium_root, Some(&exec)));
+
+        let chrome_exec = CommandSpec {
+            program: "/usr/bin/google-chrome-stable".to_string(),
+            args: Vec::new(),
+            env: Vec::new(),
+        };
+        assert_eq!(root_score(chromium_root, Some(&chrome_exec)), 0);
     }
 
     #[test]
