@@ -15,9 +15,7 @@ pub fn render(browser: &Browser) {
         .map(|line| visible_width(line))
         .max()
         .unwrap_or(0);
-    let right_width = terminal_width()
-        .saturating_sub(logo_width + 4)
-        .clamp(50, 120);
+    let right_width = terminal_width().saturating_sub(logo_width + 4).max(50);
 
     let engine = browser
         .engine
