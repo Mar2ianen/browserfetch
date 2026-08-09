@@ -19,6 +19,8 @@ The name is a little joke. The output is useful enough to keep around.
   directories when the data format is present;
 - displays installed extensions from Firefox `extensions.json` or Chromium
   `manifest.json` files;
+- reports Gecko/Blink from profile backends and recognizes WebKit for GNOME Web
+  and Servo for Servo-style desktop entries;
 - renders the browser icon with optional `chafa`, falling back to a text box;
 - stays local: it does not make network requests or upload browser data.
 
@@ -85,6 +87,10 @@ or:
 - Firefox extensions are parsed from the active profile's `extensions.json`;
   Chromium extensions are read from `manifest.json` and their state from
   `Preferences`.
+
+Engine detection is intentionally conservative: a known profile backend or an
+unambiguous desktop entry may provide an engine hint; otherwise the output
+shows `unknown` instead of borrowing metadata from another installed browser.
 
 ## Development
 

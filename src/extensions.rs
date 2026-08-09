@@ -66,15 +66,20 @@ pub fn discover_backend(exec: Option<&CommandSpec>) -> Option<ProfileBackend> {
     let home = home_dir()?;
     profile_root_candidates(&home, exec)
         .into_iter()
-        .find_map(|root| {
-            if is_firefox_profile_root(&root) {
-                Some(ProfileBackend::Firefox(root))
-            } else if is_chromium_profile_root(&root) {
-                Some(ProfileBackend::Chromium(root))
-            } else {
-                None
-            }
-        })
+        .find_map(|root| detect_backend(root, exec))
+}
+
+fn detect_backend(root: PathBuf, exec: Option<&CommandSpec>) -> Option<ProfileBackend> {
+    if root_score(&root, exec) != 0 {
+        return None;
+    }
+    if is_firefox_profile_root(&root) {
+        Some(ProfileBackend::Firefox(root))
+    } else if is_chromium_profile_root(&root) {
+        Some(ProfileBackend::Chromium(root))
+    } else {
+        None
+    }
 }
 
 fn profile_root_candidates(home: &Path, exec: Option<&CommandSpec>) -> Vec<PathBuf> {
@@ -522,5 +527,24 @@ mod tests {
         let firefox_root = Path::new("/tmp/.config/mozilla/firefox");
         let chromium_root = Path::new("/tmp/.config/google-chrome");
         assert!(root_score(firefox_root, Some(&exec)) < root_score(chromium_root, Some(&exec)));
+    }
+
+    #[test]
+    fn unrelated_profile_root_is_not_used_as_backend() {
+        let root = temp_root();
+        fs::create_dir(root.join("profile")).expect("create Firefox profile");
+        fs::write(
+            root.join("profiles.ini"),
+            "[Profile0]\nName=default\nIsRelative=1\nPath=profile\n",
+        )
+        .expect("write profiles.ini");
+        let exec = CommandSpec {
+            program: "/usr/bin/foo-browser".to_string(),
+            args: Vec::new(),
+            env: Vec::new(),
+        };
+
+        assert_eq!(detect_backend(root.clone(), Some(&exec)), None);
+        fs::remove_dir_all(root).expect("remove test directory");
     }
 }

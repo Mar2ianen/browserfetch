@@ -10,6 +10,8 @@ use crate::util::{CommandSpec, command_output, command_spec_output, home_dir, pa
 pub enum Engine {
     Gecko,
     Blink,
+    WebKit,
+    Servo,
 }
 
 impl Engine {
@@ -17,6 +19,8 @@ impl Engine {
         match self {
             Self::Gecko => "208",
             Self::Blink => "33",
+            Self::WebKit => "39",
+            Self::Servo => "201",
         }
     }
 }
@@ -26,6 +30,8 @@ impl fmt::Display for Engine {
         let name = match self {
             Self::Gecko => "Gecko",
             Self::Blink => "Blink",
+            Self::WebKit => "WebKit",
+            Self::Servo => "Servo",
         };
         formatter.write_str(name)
     }
@@ -68,7 +74,17 @@ impl Browser {
             .as_ref()
             .map(|backend| backend.extensions(active_profile.as_ref()))
             .unwrap_or_default();
-        let engine = profile_backend.as_ref().map(ProfileBackend::engine);
+        let engine = profile_backend
+            .as_ref()
+            .map(ProfileBackend::engine)
+            .or_else(|| {
+                detect_engine_hint(
+                    desktop_id.as_deref(),
+                    &name,
+                    exec.as_ref(),
+                    icon_name.as_deref(),
+                )
+            });
         let color = engine.map(Engine::color).unwrap_or("117");
         let icon = icon_name.and_then(|icon| logo::resolve_icon(&icon));
         let version = exec.as_ref().and_then(browser_version);
@@ -117,4 +133,86 @@ fn desktop_value(data: &str, key: &str) -> Option<String> {
 
 fn browser_version(exec: &CommandSpec) -> Option<String> {
     command_spec_output(exec, &["--version"])
+}
+
+fn detect_engine_hint(
+    desktop_id: Option<&str>,
+    name: &str,
+    exec: Option<&CommandSpec>,
+    icon: Option<&str>,
+) -> Option<Engine> {
+    let probe = format!(
+        "{} {} {} {}",
+        desktop_id.unwrap_or_default().to_ascii_lowercase(),
+        name.to_ascii_lowercase(),
+        exec.map(|spec| spec.program.to_ascii_lowercase())
+            .unwrap_or_default(),
+        icon.unwrap_or_default().to_ascii_lowercase()
+    );
+
+    if ["epiphany", "org.gnome.epiphany", "gnome-web", "webkit"]
+        .iter()
+        .any(|signature| probe.contains(signature))
+    {
+        return Some(Engine::WebKit);
+    }
+    if ["servo", "servoshell"]
+        .iter()
+        .any(|signature| probe.contains(signature))
+    {
+        return Some(Engine::Servo);
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn command(program: &str) -> CommandSpec {
+        CommandSpec {
+            program: program.to_string(),
+            args: Vec::new(),
+            env: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn hints_webkit_for_gnome_web() {
+        assert_eq!(
+            detect_engine_hint(
+                Some("org.gnome.Epiphany.desktop"),
+                "Web",
+                Some(&command("epiphany")),
+                None
+            ),
+            Some(Engine::WebKit)
+        );
+    }
+
+    #[test]
+    fn hints_servo_without_creating_a_profile_backend() {
+        assert_eq!(
+            detect_engine_hint(
+                Some("servo.desktop"),
+                "Servo",
+                Some(&command("servoshell")),
+                None
+            ),
+            Some(Engine::Servo)
+        );
+    }
+
+    #[test]
+    fn leaves_unknown_engine_unknown() {
+        assert_eq!(
+            detect_engine_hint(
+                Some("foo-browser.desktop"),
+                "FooBrowser",
+                Some(&command("foo-browser")),
+                None
+            ),
+            None
+        );
+    }
 }
