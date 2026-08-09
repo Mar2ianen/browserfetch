@@ -333,7 +333,12 @@ fn browser_version(exec: &CommandSpec) -> Option<String> {
 }
 
 fn engine_from_version(version: &str) -> Option<Engine> {
-    version.starts_with("Servo ").then_some(Engine::Servo)
+    version
+        .lines()
+        .map(str::trim)
+        .map(|line| line.strip_prefix("Version:").unwrap_or(line).trim())
+        .any(|line| line.starts_with("Servo "))
+        .then_some(Engine::Servo)
 }
 
 #[cfg(test)]
@@ -353,6 +358,10 @@ mod tests {
     #[test]
     fn detects_servo_from_self_reported_version() {
         assert_eq!(engine_from_version("Servo 2026-08-09"), Some(Engine::Servo));
+        assert_eq!(
+            engine_from_version("Version: Servo 0.4.0-e8dbc1dfb"),
+            Some(Engine::Servo)
+        );
         assert_eq!(engine_from_version("FooBrowser 1.0"), None);
     }
 }

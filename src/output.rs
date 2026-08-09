@@ -208,8 +208,9 @@ fn separator_line(width: usize) -> String {
 }
 
 fn clean_version(version: &str) -> String {
+    let version = version.strip_prefix("Mozilla ").unwrap_or(version);
     version
-        .strip_prefix("Mozilla ")
+        .strip_prefix("Version: ")
         .unwrap_or(version)
         .to_string()
 }
