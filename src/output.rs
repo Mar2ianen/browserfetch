@@ -168,12 +168,11 @@ fn extension_summary_rows(browser: &Browser, width: usize, theme: Theme) -> Vec<
 }
 
 fn extension_tree_group(label: &str, items: &[String], width: usize, theme: Theme) -> Vec<String> {
-    let mut rows = Vec::new();
+    let mut rows = vec![row(label, "", width, theme)];
     for (idx, item) in items.iter().enumerate() {
         let last_item = idx + 1 == items.len();
-        let key = if idx == 0 { label } else { "" };
         let branch = if last_item { "└─" } else { "├─" };
-        rows.push(tree_leaf_row(key, branch, item, width, theme));
+        rows.push(tree_leaf_row("", branch, item, width, theme));
     }
     rows
 }
@@ -245,4 +244,20 @@ fn terminal_width() -> usize {
         .and_then(|value| value.parse().ok())
         .or_else(|| command_output("tput", &["cols"]).and_then(|value| value.parse().ok()))
         .unwrap_or(140)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_tree_keeps_group_header_above_children() {
+        let items = ["First extension".to_string(), "Last extension".to_string()];
+        let rows = extension_tree_group("Enabled", &items, 80, Theme::new("33"));
+
+        assert!(rows[0].contains("Enabled"));
+        assert!(!rows[0].contains("├─"));
+        assert!(rows[1].contains("├─ First extension"));
+        assert!(rows[2].contains("└─ Last extension"));
+    }
 }
