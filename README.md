@@ -1,138 +1,327 @@
+<div align="center">
+
 # browserfetch
 
-A tiny, terminal-friendly browser fetcher for Linux desktops.
+### `fastfetch`, but your browser has been selected for inspection.
 
-`browserfetch` is a deliberately small Rust CLI in the spirit of `fastfetch`,
-but focused on the browser you actually use. It reads the XDG default browser's
-desktop entry, shows its name, icon and version, finds extra profile data when a
-known local layout is present, and prints a compact OS/session summary.
+**Linux · Rust · XDG · browser archaeology**
 
-The name is a little joke. The output is useful enough to keep around.
+> browserfetch does not support *Helium*.
+> browserfetch supports **browsers**.
 
-## What it does
+</div>
 
-- detects any XDG default browser through `xdg-settings` and desktop entry
-  files;
-- treats Firefox, Chromium and Epiphany layouts as optional profile backends rather than
-  hard-coded browser identities;
-- reads Firefox and Chromium-family profile data from local configuration
-  directories when the data format is present;
-- displays installed extensions from Firefox `extensions.json` or Chromium
-  `manifest.json`/`Preferences` data;
-- reports Gecko/Blink/WebKitGTK from profile backends and recognizes Servo from
-  its self-reported version;
-- renders the browser icon with optional `chafa`, falling back to a text box;
-- stays local: it does not make network requests or upload browser data.
+---
 
-## Example
+`browserfetch` is a small Linux CLI that asks your desktop what browser you use,
+finds the browser's real icon, pokes at whatever local profile data can be
+identified without lying, and prints the result in a fetch-style terminal view.
+
+It started as a joke.
+
+Unfortunately, it now has architecture.
 
 ```text
-user@host
-----------------------------------  Browser   : Brave Browser
-                                   Engine    : Blink
-                                   Version   : 1.2.3
-                                   OS        : Linux / 6.x
-                                   Session   : wayland / niri
-                                   Profile   : Default / Default
-                                   Extensions: 12 (12 enabled, 0 disabled, 0 unknown)
+                 xdg-settings / selector
+                          │
+                          ▼
+                    .desktop entry
+                 Name / Exec / Icon
+                          │
+            ┌─────────────┴─────────────┐
+            │                           │
+            ▼                           ▼
+      generic identity           optional evidence
+      version + logo         profile format / self-report
+            │                           │
+            │               ┌───────────┼────────────┐
+            │               ▼           ▼            ▼
+            │            Firefox     Chromium     Epiphany
+            │               │           │            │
+            │             Gecko       Blink      WebKitGTK
+            │
+            └───────────────────────────────► terminal
+
+                          Servo
+                            │
+                      `--version`
+                            │
+                            ▼
+                         Servo
 ```
 
-Any browser with a valid `.desktop` entry can show its identity and icon; its
-version is shown when the entry's executable can be parsed and invoked.
-Profile and extension details are available when browserfetch recognizes the
-local Firefox or Chromium data layout.
+No giant hard-coded browser Pokédex is required.
 
-## Install
+## What the cursed thing does
 
-```sh
-cargo install --path .
+- detects the default XDG browser through `xdg-settings`;
+- lets you select another installed browser by display name, desktop ID or
+  executable;
+- discovers `.desktop` files from normal XDG locations and common Nix profile
+  locations;
+- renders the browser's actual desktop icon through `chafa`;
+- reads the browser version from its configured command;
+- recognizes Firefox, Chromium and Epiphany **profile formats** as optional
+  backends instead of treating browser brands as types;
+- derives Gecko, Blink and WebKitGTK from those profile backends;
+- recognizes Servo from Servo's own version output;
+- reads Firefox extensions from `extensions.json`;
+- reads Chromium-family extensions from on-disk manifests **and** embedded
+  `Preferences` metadata;
+- resolves Chromium `__MSG_name__` extension names through `_locales`;
+- shows enabled / disabled / unknown extension state without pretending
+  `unknown == enabled`;
+- handles Unicode terminal width properly;
+- has dynamic completion for zsh, bash and fish;
+- performs no network requests and uploads absolutely nothing.
+
+## Exhibit A
+
+```text
+chechulin@archlinux
+----------------------------------
+Browser    : Helium
+Engine     : Blink
+Version    : Helium 0.15.2.1 (Chromium ...)
+OS         : Arch Linux / 6.x
+Session    : wayland / niri
+Profile    : Default / Default
+Extensions : 3 (3 enabled, 0 disabled, 0 unknown)
+Enabled    :
+           : ├─ Chromium PDF Viewer 1
+           : ├─ extstore-fixups 0.0.0
+           : └─ uBlock Origin 1.72.2
 ```
 
-After that the command is available as:
+Helium is not special-cased here. Its desktop entry provides its identity and
+icon; its local data proves that the profile is Chromium-family; the engine
+follows from that evidence.
+
+That distinction is the entire point.
+
+## Browser identity is not browser family
+
+A browser does **not** have to be known to browserfetch to be displayed.
+
+If Linux has a valid desktop entry for `SuperMegaFoxFork3000`, browserfetch can
+already use its `Name`, `Exec` and `Icon`. Extra information appears only when
+there is evidence for it.
+
+Current profile backends:
+
+| Evidence | Engine | Profile | Extensions |
+|---|---|---:|---:|
+| Firefox-family profile layout | Gecko | yes | yes |
+| Chromium-family profile layout | Blink | yes | yes |
+| Epiphany profile layout | WebKitGTK | backend root | no |
+| Servo self-reported version | Servo | no | no |
+| Unknown browser | unknown | unknown | no |
+
+`unknown` is a valid answer. Inventing metadata is not.
+
+## Usage
+
+Use the default browser:
 
 ```sh
 browserfetch
 ```
 
-## Requirements
+Inspect a specific browser:
 
-- Linux with an XDG desktop environment;
-- Rust 1.85 or newer (the project uses edition 2024);
-- `chafa` is optional and only needed for image-based logos.
+```sh
+browserfetch Firefox
+browserfetch Google Chrome
+browserfetch Helium
+browserfetch org.gnome.Epiphany.desktop
+```
 
-## Build
+Names with spaces may be quoted or passed as separate words.
+
+List discovered browsers:
+
+```sh
+browserfetch --list
+```
+
+Internal completion source:
+
+```sh
+browserfetch --complete
+```
+
+Help:
+
+```sh
+browserfetch --help
+```
+
+## Tab completion, because typing is a design failure
+
+Completion candidates are generated dynamically by `browserfetch --complete`,
+so installing another browser does not require editing a completion file.
+
+### zsh
+
+```sh
+fpath=(/path/to/browserfetch/completions $fpath)
+autoload -Uz compinit && compinit
+```
+
+### bash
+
+```sh
+source /path/to/browserfetch/completions/browserfetch.bash
+```
+
+### fish
+
+```fish
+source /path/to/browserfetch/completions/browserfetch.fish
+```
+
+Then:
+
+```text
+$ browserfetch <TAB>
+Firefox    Google Chrome    Helium    ...whatever you installed at 03:17
+```
+
+## Profile discovery
+
+### Firefox-family
+
+browserfetch looks for real Firefox-style profile roots and validates the
+layout through `profiles.ini` / profile data before using it. The active profile
+and extension state are read from local Firefox metadata.
+
+### Chromium-family
+
+Chromium-style roots are recognized through `Local State` and profile data.
+`profile.last_used` is used when available instead of blindly assuming
+`Default`.
+
+Extension metadata may come from:
+
+```text
+Profile/Extensions/<id>/<version>/manifest.json
+```
+
+or from:
+
+```text
+Preferences → extensions.settings
+```
+
+This matters for browsers that package built-in or managed extensions in ways
+that do not produce a normal `Extensions/<id>` tree.
+
+### Epiphany
+
+Epiphany is treated as its own profile backend. browserfetch looks under XDG
+data locations and the Flatpak data path and requires structural profile markers
+before reporting WebKitGTK.
+
+### Servo
+
+Servo does not need a fake profile backend. If the executable identifies itself
+as Servo through its version output, browserfetch reports `Engine: Servo`.
+
+Beautifully stupid. Semantically correct.
+
+## Desktop and Nix discovery
+
+Desktop entries are searched in normal user/system XDG application directories,
+plus common Nix locations such as:
+
+```text
+~/.nix-profile/share/applications
+$NIX_PROFILES/*/share/applications
+$XDG_DATA_HOME/applications
+$XDG_DATA_DIRS/*/applications
+```
+
+So an application can be found even when its package name, desktop name and
+actual executable name have decided to become three unrelated concepts.
+
+## Logo rendering
+
+If `chafa` is installed, browserfetch resolves the icon named by the desktop
+entry and renders it as terminal symbols.
+
+```text
+.desktop → Icon=whatever → icon theme → chafa → pixels, but cursed
+```
+
+`chafa` is forced into symbol output so terminal graphics protocols do not wreck
+layout calculations in terminals such as foot or Ghostty.
+
+If no usable icon or `chafa` is available, browserfetch falls back to a text
+logo rather than exploding dramatically.
+
+## Install
+
+Requirements:
+
+- Linux;
+- Rust 1.85+;
+- `chafa` for image-based logos (optional).
+
+Build:
 
 ```sh
 cargo build --release
 ```
 
-## Run
-
-```sh
-cargo run
-```
-
-or:
+Run directly:
 
 ```sh
 ./target/release/browserfetch
 ```
 
-To inspect a specific installed browser instead of the default one:
+Or install from the checkout:
 
 ```sh
-browserfetch helium
-browserfetch --list
+cargo install --path .
 ```
 
-The selector can be the browser name, desktop entry ID, or executable name.
-Browsers without a `.desktop` file can still be selected when their executable
-is on `PATH`; profile-backed Nix installs are included in `--list`.
+## Dependencies
 
-Shell completion is available for browser names, including names with spaces:
+The dependency graph has not yet achieved sentience:
 
-```sh
-# zsh
-fpath=(/path/to/browserfetch/completions $fpath)
-autoload -Uz compinit && compinit
-
-# bash
-source /path/to/browserfetch/completions/browserfetch.bash
-
-# fish
-source /path/to/browserfetch/completions/browserfetch.fish
+```toml
+serde_json = "1"
+unicode-width = "0.2.2"
 ```
 
-The completion scripts query `browserfetch --complete`, so the candidates stay
-in sync with browsers installed on the machine.
-
-## Profile discovery
-
-- Chromium-family profiles are discovered from `~/.config/...` by looking for
-  `Local State` and profile directories.
-- Epiphany profiles are discovered under `$XDG_DATA_HOME/epiphany` and
-  Flatpak's `~/.var/app/org.gnome.Epiphany/data/epiphany` when migration and
-  profile data markers are present.
-- Firefox profiles are discovered from `~/.config/mozilla/firefox`,
-  `~/.mozilla/firefox` and the common Flatpak Firefox path.
-- Firefox extensions are parsed from the active profile's `extensions.json`;
-  Chromium extensions are read from `manifest.json` and their state from
-  `Preferences`.
-
-Engine detection is intentionally conservative: a known profile backend or an
-unambiguous desktop entry may provide an engine hint; otherwise the output
-shows `unknown` instead of borrowing metadata from another installed browser.
+`unicode-width` exists because reimplementing Unicode terminal-cell width by
+hand was, briefly, considered a reasonable life choice.
 
 ## Development
 
 ```sh
 cargo fmt --check
 cargo test --locked
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --locked -- -D warnings
 ```
 
-Changes are checked by GitHub Actions as well.
+GitHub Actions runs the same general quality checks.
+
+The preferred behavior is conservative:
+
+```text
+know it  → print it
+prove it → infer it
+guess it → absolutely not
+```
+
+## Why?
+
+Because the world already had fetch programs for the OS, hardware, Git repos and
+probably several household appliances.
+
+The browser was getting suspiciously comfortable.
 
 ## License
 
-Licensed under the MIT License. See [LICENSE](LICENSE) for the full text.
+MIT. See [LICENSE](LICENSE).
